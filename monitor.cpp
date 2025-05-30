@@ -13,33 +13,43 @@ enum VitalStatus {
     HIGH
 };
 
-struct VitalLimits {
-    float minValue;
-    float maxValue;
+struct VitalThreshold {
+    float min;
+    float max;
     float warningTolerancePercent;
-    const char* vitalName;
-    const char* criticalMessage;
-    const char* nearLowMessage;
-    const char* nearHighMessage;
+    const char* name;
+    const char* alertMessage;
+    const char* warnLowMessage;
+    const char* warnHighMessage;
 };
 
-float calculateWarningDelta(const VitalLimits& limits) {
-    return limits.maxValue * (limits.warningTolerancePercent / 100.0f);
+float computeWarningDelta(const VitalThreshold& threshold) {
+    return threshold.max * (threshold.warningTolerancePercent / 100.0f);
 }
 
-VitalStatus determineStatus(float value, const VitalLimits& limits) {
-    float warningDelta = calculateWarningDelta(limits);
-    float nearLowThreshold = limits.minValue + warningDelta;
-    float nearHighThreshold = limits.maxValue - warningDelta;
+VitalStatus determineLowerRange(float value, float min, float nearLow) {
+    if (value < min) return LOW;
+    if (value < nearLow) return NEAR_LOW;
+    return NORMAL;
+}
 
-    if (value < limits.minValue) return LOW;
-    if (value < nearLowThreshold) return NEAR_LOW;
-    if (value <= nearHighThreshold) return NORMAL;
-    if (value <= limits.maxValue) return NEAR_HIGH;
+VitalStatus determineUpperRange(float value, float nearHigh, float max) {
+    if (value <= nearHigh) return NORMAL;
+    if (value <= max) return NEAR_HIGH;
     return HIGH;
 }
 
-void displayCriticalAlert(const char* message) {
+VitalStatus evaluateStatus(float value, const VitalThreshold& threshold) {
+    float delta = computeWarningDelta(threshold);
+    float nearLow = threshold.min + delta;
+    float nearHigh = threshold.max - delta;
+
+    return value < nearHigh
+           ? determineLowerRange(value, threshold.min, nearLow)
+           : determineUpperRange(value, nearHigh, threshold.max);
+}
+
+void showAlert(const char* message) {
     cout << message << "\n";
     for (int i = 0; i < 6; ++i) {
         cout << "\r* " << flush;
@@ -49,49 +59,53 @@ void displayCriticalAlert(const char* message) {
     }
 }
 
-void displayWarning(VitalStatus status, const VitalLimits& limits) {
+bool isCritical(VitalStatus status) {
+    return status == LOW || status == HIGH;
+}
+
+void showWarning(VitalStatus status, const VitalThreshold& threshold) {
     if (status == NEAR_LOW) {
-        cout << limits.vitalName << ": " << limits.nearLowMessage << "\n";
+        cout << threshold.name << ": " << threshold.warnLowMessage << "\n";
     } else if (status == NEAR_HIGH) {
-        cout << limits.vitalName << ": " << limits.nearHighMessage << "\n";
+        cout << threshold.name << ": " << threshold.warnHighMessage << "\n";
     }
 }
 
-bool evaluateVital(float value, const VitalLimits& limits) {
-    VitalStatus status = determineStatus(value, limits);
-    if (status == LOW || status == HIGH) {
-        displayCriticalAlert(limits.criticalMessage);
+bool checkAndAlert(float value, const VitalThreshold& threshold) {
+    VitalStatus status = evaluateStatus(value, threshold);
+    if (isCritical(status)) {
+        showAlert(threshold.alertMessage);
         return false;
     }
-    displayWarning(status, limits);
+    showWarning(status, threshold);
     return true;
 }
 
-int checkVitals(float temperature, float pulseRate, float spo2) {
-    VitalLimits temperatureLimits = {
+int vitalsOk(float temperature, float pulseRate, float spo2) {
+    VitalThreshold tempThresh = {
         95.0f, 102.0f, 1.5f,
         "Temperature", "Temperature is critical!",
         "Warning: Approaching hypothermia",
         "Warning: Approaching hyperthermia"
     };
 
-    VitalLimits pulseRateLimits = {
+    VitalThreshold pulseThresh = {
         60.0f, 100.0f, 1.5f,
         "Pulse Rate", "Pulse Rate is out of range!",
         "Warning: Approaching bradycardia",
         "Warning: Approaching tachycardia"
     };
 
-    VitalLimits spo2Limits = {
+    VitalThreshold spo2Thresh = {
         90.0f, 100.0f, 1.5f,
         "SPO2", "Oxygen Saturation out of range!",
         "Warning: Approaching hypoxia",
         "Warning: Approaching SPO2 ceiling"
     };
 
-    bool temperatureOk = evaluateVital(temperature, temperatureLimits);
-    bool pulseRateOk = evaluateVital(pulseRate, pulseRateLimits);
-    bool spo2Ok = evaluateVital(spo2, spo2Limits);
+    bool tempOk = checkAndAlert(temperature, tempThresh);
+    bool pulseOk = checkAndAlert(pulseRate, pulseThresh);
+    bool spo2Ok = checkAndAlert(spo2, spo2Thresh);
 
-    return temperatureOk && pulseRateOk && spo2Ok;
+    return tempOk && pulseOk && spo2Ok;
 }
